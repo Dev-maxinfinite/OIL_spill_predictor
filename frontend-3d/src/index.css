@@ -1,0 +1,85 @@
+:root {
+  /* Ocean/Futuristic Theme Variables */
+  --bg-dark: #050a15;
+  --bg-gradient: linear-gradient(135deg, #050a15 0%, #0a1930 100%);
+  --cyan-neon: #00f0ff;
+  --blue-neon: #0051ff;
+  --glass-bg: rgba(10, 25, 48, 0.4);
+  --glass-border: rgba(0, 240, 255, 0.15);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --glass-blur: blur(12px);
+  --text-primary: #e0f2fe;
+  --text-secondary: #94a3b8;
+  
+  --risk-critical: #ff2a2a;
+  --risk-high: #ff8c00;
+  --risk-medium: #facc15;
+  --risk-safe: #00e676;
+
+  /* Fonts */
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-dark);
+  background-image: var(--bg-gradient);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  border-radius: 16px;
+}
+
+/* Glowing text */
+.glow-text {
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+/* Neon Glow Outline */
+.neon-border {
+  border: 1px solid var(--cyan-neon);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 240, 255, 0.1);
+}
+
+/* Animations */
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 10px rgba(0, 240, 255, 0.2); }
+  50% { box-shadow: 0 0 25px rgba(0, 240, 255, 0.6); }
+  100% { box-shadow: 0 0 10px rgba(0, 240, 255, 0.2); }
+}
+
+.pulse-glow {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark); 
+}
+::-webkit-scrollbar-thumb {
+  background: var(--blue-neon); 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cyan-neon); 
+}
