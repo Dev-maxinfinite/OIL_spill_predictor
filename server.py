@@ -140,63 +140,102 @@ class UNetPredictor:
         return mask
     
     def predict(self, image):
-        """Predict oil spill mask with confidence calibration"""
-        if not self.is_loaded or cv2 is None or np is None:
-            # Enhanced fallback: edge detection + adaptive thresholding
-            if cv2 is None:
-                return np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+        """Predict oil spill mask with confidence calibration and smart CV logic fallback"""
+        if cv2 is None or np is None:
+            return np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
             
-            # Convert to different color spaces
-            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-            
-            # Oil spill detection in HSV space (darker regions)
-            lower_oil = np.array([0, 0, 0])
-            upper_oil = np.array([180, 50, 100])
-            mask_hsv = cv2.inRange(hsv, lower_oil, upper_oil)
-            
-            # Edge detection for boundaries
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            edges = cv2.Canny(gray, 50, 150)
-            
-            # Combine masks
-            mask = cv2.bitwise_or(mask_hsv, edges)
-            
-            # Apply morphological operations
-            kernel = np.ones((5,5), np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-            
-            return mask
-        
-        # Store original size for later
         original_height, original_width = image.shape[:2]
         
-        # Preprocess
-        processed = self.preprocess_image(image)
+        # 1. Try Deep Learning Model (if loaded)
+        dl_mask = np.zeros((original_height, original_width), dtype=np.uint8)
         
-        # Predict with augmentation for robustness
-        predictions = []
+        if self.is_loaded:
+            try:
+                processed = self.preprocess_image(image)
+                predictions = []
+                # Original prediction
+                pred_orig = self.model.predict(processed, verbose=0)
+                predictions.append(pred_orig)
+                
+                # Horizontal flip for ensemble
+                if np.random.random() > 0.5:
+                    flipped = np.flip(processed, axis=2)
+                    pred_flip = self.model.predict(flipped, verbose=0)
+                    pred_flip = np.flip(pred_flip, axis=2)
+                    predictions.append(pred_flip)
+                
+                # Average predictions
+                prediction = np.mean(predictions, axis=0)
+                mask = self.postprocess_mask(prediction, confidence_threshold=0.3)
+                dl_mask = cv2.resize(mask.astype(np.uint8), (original_width, original_height))
+            except Exception as e:
+                print(f"DL Model failed: {e}")
+                
+        # 2. Smart Computer Vision Feature Extraction
+        try:
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            v_channel = hsv[:, :, 2]
+            
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            v_enhanced = clahe.apply(v_channel)
+            
+            blurred = cv2.GaussianBlur(v_enhanced, (15, 15), 0)
+            
+            # Otsu's thresholding for dark prominent shapes
+            _, th_mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            
+            # K-Means clustering for color separation
+            Z = image.reshape((-1, 3))
+            Z = np.float32(Z)
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+            _, labels, _ = cv2.kmeans(Z, 3, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+            
+            counts = np.bincount(labels.flatten())
+            sorted_clusters = np.argsort(counts)[::-1]
+            anomaly_cluster = sorted_clusters[1] # 2nd largest cluster
+            
+            kmeans_mask = np.zeros_like(labels.flatten(), dtype=np.uint8)
+            kmeans_mask[labels.flatten() == anomaly_cluster] = 255
+            kmeans_mask = kmeans_mask.reshape((original_height, original_width))
+            
+            # Combine logic
+            cv_mask = cv2.bitwise_and(th_mask, kmeans_mask)
+            
+            # Cleanup
+            kernel = np.ones((5,5), np.uint8)
+            cv_mask = cv2.morphologyEx(cv_mask, cv2.MORPH_OPEN, kernel, iterations=2)
+            cv_mask = cv2.morphologyEx(cv_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
+            
+            # Enforce size constraints
+            contours, _ = cv2.findContours(cv_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            clean_cv_mask = np.zeros_like(cv_mask)
+            
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if (original_height * original_width * 0.005) < area < (original_height * original_width * 0.8):
+                    cv2.drawContours(clean_cv_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+                    
+            cv_mask = clean_cv_mask
+            
+        except Exception as e:
+            print(f"CV Feature extraction failed: {e}")
+            cv_mask = np.zeros((original_height, original_width), dtype=np.uint8)
+            
+        # 3. Intelligent Decision Logic
+        dl_coverage = np.sum(dl_mask > 0) / (original_height * original_width)
+        cv_binary = (cv_mask > 0).astype(np.uint8)
         
-        # Original prediction
-        pred_orig = self.model.predict(processed, verbose=0)
-        predictions.append(pred_orig)
-        
-        # Horizontal flip for ensemble
-        if np.random.random() > 0.5:
-            flipped = np.flip(processed, axis=2)
-            pred_flip = self.model.predict(flipped, verbose=0)
-            pred_flip = np.flip(pred_flip, axis=2)
-            predictions.append(pred_flip)
-        
-        # Average predictions
-        prediction = np.mean(predictions, axis=0)
-        
-        # Postprocess with confidence calibration
-        mask = self.postprocess_mask(prediction, confidence_threshold=0.3)
-        
-        # Resize back to original size
-        mask = cv2.resize(mask.astype(np.uint8), (original_width, original_height))
-        
-        return mask
+        if dl_coverage < 0.01 or dl_coverage > 0.8:
+            print("Using smart CV logic for prediction (DL output discarded)")
+            final_mask = cv_binary
+        else:
+            print("Fused DL and CV logic for enhanced prediction")
+            final_mask = cv2.bitwise_or(dl_mask, cv_binary)
+            
+        kernel = np.ones((3,3), np.uint8)
+        final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel)
+            
+        return final_mask
 
 # Initialize U-Net predictor
 unet_predictor = UNetPredictor(MODEL_PATH)
